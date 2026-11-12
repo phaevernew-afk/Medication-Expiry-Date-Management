@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>藥品銷毀與效期管理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root { --ink:#1e2a3a; --muted:#6b7785; --line:#e3e8ee; --accent:#2b6aa8; --bg:#f2f5f8; }
+  * { box-sizing:border-box; }
+  body { font-family:"PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:20px; }
+  .app { max-width:1000px; margin:0 auto; }
+  header { background:linear-gradient(135deg,#1c3a63,#2b6aa8); color:#fff; border-radius:10px; padding:22px; text-align:center; margin-bottom:16px; }
+  header h1 { margin:0 0 4px; font-size:22px; } header p { margin:0; font-size:13px; opacity:.85; }
+  .back { display:inline-block; font-size:13px; color:var(--accent); text-decoration:none; margin-bottom:10px; }
+  .tabs { display:flex; gap:8px; margin-bottom:14px; }
+  .tabs button { flex:1; background:#fff; color:var(--ink); border:1px solid var(--line); padding:10px; border-radius:8px; font-size:14px; cursor:pointer; }
+  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+  .f { display:flex; flex-direction:column; gap:3px; } .f label { font-size:12px; color:var(--muted); }
+  input, select, textarea { border:1px solid #ccd3db; border-radius:5px; padding:7px 9px; font-size:13px; font-family:inherit; background:#fff; }
+  input[readonly] { background:#f0f2f5; }
+  button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:5px; padding:7px 13px; font-size:13px; cursor:pointer; font-family:inherit; }
+  button.ghost { background:#fff; color:var(--accent); } button.danger { background:#fff; color:#c62f3e; border-color:#e5a3aa; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .chip { background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:16px; padding:5px 12px; }
+  .chip.on { border-width:2px; font-weight:600; border-color:var(--accent); }
+  .chip.expired { color:#c62f3e; } .chip.m1 { color:#d4571a; } .chip.m3 { color:#a67700; } .chip.m6 { color:#5d7a1f; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border-bottom:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:500; background:#fafbfc; } .num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.act { white-space:nowrap; text-align:right; } td.act button { margin-left:4px; padding:4px 9px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; white-space:nowrap; }
+  .badge.expired { background:#fde7ea; color:#c62f3e; } .badge.m1 { background:#ffe9dc; color:#d4571a; }
+  .badge.m3 { background:#fff3cf; color:#8a6500; } .badge.m6 { background:#eaf3d6; color:#4d6a14; } .badge.ok { background:#eef1f4; color:#6b7785; }
+  .empty { text-align:center; color:var(--muted); padding:24px; font-size:13px; }
+  dialog { border:none; border-radius:10px; padding:20px; width:min(520px,94vw); box-shadow:0 8px 30px rgba(0,0,0,.25); }
+  dialog::backdrop { background:rgba(0,0,0,.4); } dialog .f { margin-bottom:10px; } dialog input, dialog select, dialog textarea { width:100%; }
+  textarea { width:100%; min-height:120px; }
+  .print-only { display:none; }
+  .banner { background:#fff3cf; border:1px solid #e0a030; border-radius:8px; padding:10px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:13px; flex-wrap:wrap; }
+  .banner.ok { background:#eaf3d6; border-color:#b5d07a; }
+  dialog .pq { width:80px; } dialog td select { width:auto; }
+  @media print {
+    @page { size:A4 landscape; margin:12mm; }
+    body { background:#fff; padding:0; } .no-print { display:none !important; } .print-only { display:block; }
+    .card { border:none; padding:0; } th, td { border:1px solid #444; } .col-act { display:none; }
+    .print-sign { margin-top:24px; font-size:13px; display:flex; justify-content:space-between; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <a class="back no-print" href="./">← 回藥劑科工作台</a>
+  <header class="no-print"><h1>藥品銷毀與效期管理</h1><p>登記銷毀藥品，並與盤點發現的半年內近效期藥品一起追蹤</p></header>
+
+  <div class="tabs no-print">
+    <button id="t_items" onclick="setTab('items')">近效期藥品</button>
+    <button id="t_logs" onclick="setTab('logs')">銷毀紀錄</button>
+    <button id="t_tools" onclick="setTab('tools')">盤點匯入 / 備份</button>
+  </div>
+
+  <!-- 近效期 -->
+  <div id="p_items">
+    <div id="banner" class="no-print"></div>
+    <div class="card no-print">
+      <h2>手動新增近效期藥品</h2>
+      <div class="row">
+        <div class="f"><label>效期（年/月）</label><input id="a_exp" placeholder="2026/12" size="9"></div>
+        <div class="f"><label>藥品名稱</label><input id="a_name" size="32"></div>
+        <div class="f"><label>數量</label><input id="a_qty" type="number" min="1" style="width:90px"></div>
+        <div class="f"><label>盤點季別（選填）</label><input id="a_inv" placeholder="115年第四季" size="12"></div>
+        <button onclick="addItem()">新增</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chips no-print" id="chips"></div>
+      <div class="row no-print" style="margin-bottom:8px"><div class="f"><label>搜尋藥名</label><input id="q" oninput="renderItems()" placeholder="輸入藥名關鍵字"></div></div>
+      <table><thead><tr><th>效期</th><th>藥品名稱</th><th class="num">數量</th><th>狀態</th><th>盤點季別</th><th></th></tr></thead><tbody id="itemBody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- 銷毀紀錄 -->
+  <div id="p_logs" style="display:none">
+    <div class="card">
+      <div class="row no-print" style="margin-bottom:10px">
+        <div class="f"><label>月份</label><select id="mon" onchange="renderLogs()"></select></div>
+        <button onclick="openDestroy('')">＋ 新增銷毀紀錄</button>
+        <button class="ghost" onclick="window.print()">列印銷毀紀錄表</button>
+      </div>
+      <div class="print-only" style="text-align:center;margin-bottom:10px"><h2 style="margin:0">藥品銷毀紀錄表</h2><div id="printRange" style="font-size:13px"></div></div>
+      <table><thead><tr><th>銷毀日期</th><th>品項</th><th>效期</th><th class="num">數量</th><th>原因</th><th>執行人</th><th>監銷人</th><th>備註</th><th class="col-act"></th></tr></thead><tbody id="logBody"></tbody></table>
+      <div class="print-sign print-only"><span>藥劑科主任：＿＿＿＿＿＿＿＿</span><span>製表日期：＿＿＿＿＿＿＿＿</span></div>
+    </div>
+  </div>
+
+  <!-- 匯入 / 備份 -->
+  <div id="p_tools" class="no-print" style="display:none">
+    <div class="card">
+      <h2>匯入每季盤點的近效期 Excel</h2>
+      <p class="muted" style="margin-top:0">Excel 需有「效期、藥品名稱、數量」三欄（欄名、順序、標題列都不限）。效期請用 2026/12 這類格式。已存在的同效期同藥名會更新數量，新的會加入。</p>
+      <div class="row" style="margin-bottom:8px"><div class="f"><label>盤點季別</label><input id="i_inv" value="115年第四季"></div>
+        <label style="font-size:13px"><input type="checkbox" id="i_full"> 完整盤點：舊清單中沒列到的項目視為已用完，移出清單</label></div>
+      <div class="row"><div class="f"><label>選擇 Excel 檔（.xlsx / .xls / .csv）</label><input type="file" id="i_file" accept=".xlsx,.xls,.xlsm,.csv"></div><button onclick="importXlsx()">匯入 Excel</button></div>
+      <details style="margin-top:12px"><summary class="muted" style="cursor:pointer">或：從 Word / 表格複製貼上</summary>
+        <textarea id="i_text" placeholder="在此貼上表格內容" style="margin-top:8px"></textarea><div style="margin-top:6px"><button class="ghost" onclick="doImport()">匯入貼上內容</button></div></details>
+      <div id="i_msg" class="muted" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>匯出與備份</h2>
+      <p class="muted" style="margin-top:0">資料只存在這台電腦的這個瀏覽器裡（換電腦或清除瀏覽資料就會消失），請定期備份。</p>
+      <div class="row">
+        <button onclick="exportXlsx()">匯出 Excel</button>
+        <button class="ghost" onclick="exportJson()">下載備份檔 (.json)</button>
+        <div class="f"><label>還原備份檔</label><input type="file" accept=".json" onchange="importJson(this)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <h2 style="margin-top:0;font-size:16px">登記藥品銷毀</h2>
+  <input type="hidden" id="d_id">
+  <div class="f"><label>品項（藥品名稱）</label><input id="d_name"></div>
+  <div class="row"><div class="f" style="flex:1"><label>效期</label><input id="d_exp" placeholder="2026/12"></div>
+    <div class="f" style="flex:1"><label>銷毀數量</label><input id="d_qty" type="number" min="1"></div>
+    <div class="f" style="flex:1"><label>銷毀日期</label><input id="d_date" type="date"></div></div>
+  <div class="f"><label>原因</label><select id="d_reason"><option>效期過期</option><option>近效期下架</option><option>破損／變質</option><option>其他</option></select></div>
+  <div class="row"><div class="f" style="flex:1"><label>執行人</label><input id="d_by"></div><div class="f" style="flex:1"><label>監銷人</label><input id="d_w"></div></div>
+  <div class="f" style="margin-top:10px"><label>備註</label><input id="d_note"></div>
+  <div style="text-align:right"><button class="ghost" onclick="$('dlg').close()">取消</button> <button onclick="saveDestroy()">儲存</button></div>
+</dialog>
+
+<dialog id="dlgAlert">
+  <h2 style="margin-top:0;font-size:16px">⚠ 藥品效期提醒</h2>
+  <div id="al_body" style="font-size:13px;line-height:1.7"></div>
+  <div style="text-align:right;margin-top:12px"><button class="ghost" onclick="$('dlgAlert').close()">稍後處理</button> <button id="al_go" onclick="$('dlgAlert').close();openProcess()">處理到期藥品</button></div>
+</dialog>
+
+<dialog id="dlgProc" style="width:min(860px,96vw)">
+  <h2 style="margin-top:0;font-size:16px">處理到期藥品</h2>
+  <p class="muted" style="margin-top:0">逐筆選擇是否已銷毀。選「尚未處理」的會留在清單、下次再提醒；只有選「已銷毀」的才會寫進銷毀紀錄；選「部分」可填實際銷毀數量，剩下的繼續留在清單。</p>
+  <div style="overflow-x:auto"><table><thead><tr><th>效期</th><th>藥品名稱</th><th class="num">現有數量</th><th>狀態</th><th>處理方式</th></tr></thead><tbody id="pr_body"></tbody></table></div>
+  <div class="row" style="margin-top:12px">
+    <div class="f"><label>銷毀日期</label><input id="pr_date" type="date"></div><div class="f"><label>執行人</label><input id="pr_by"></div>
+    <div class="f"><label>監銷人</label><input id="pr_w"></div><div class="f"><label>備註</label><input id="pr_note"></div></div>
+  <div style="text-align:right;margin-top:14px"><button class="ghost" style="float:left" onclick="allDestroyed()">全部標為已銷毀（全數）</button>
+    <button class="ghost" onclick="$('dlgProc').close()">取消</button> <button onclick="applyProcess()">確認並寫入銷毀紀錄</button></div>
+</dialog>
+
+<script>
+var $ = function(i){ return document.getElementById(i); };
+var KEY = "pharm_destroy_v1";
+var db = load(), flt = "all";
+
+function load() {
+  try { var d = JSON.parse(localStorage.getItem(KEY)); if (d && d.items) { d.logs = d.logs || []; d.pref = d.pref || {}; return d; } } catch (e) {}
+  return { items: [], logs: [], pref: {} };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert("無法儲存資料，請檢查瀏覽器設定。"); } }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function normExp(s) { var m = String(s).match(/(\d{3,4})\s*[\/\-.]\s*(\d{1,2})/); if (!m) return ""; var y = +m[1]; if (y < 1911) y += 1911; return y + "/" + ("0" + m[2]).slice(-2); }
+function daysLeft(exp) {
+  var m = exp.match(/(\d{4})\/(\d{2})/); if (!m) return 9999;
+  var e = new Date(+m[1], +m[2], 0, 23, 59, 59), t = new Date(); t.setHours(0,0,0,0);
+  return Math.floor((e - t) / 864e5);
+}
+function lvl(d) { return d < 0 ? "expired" : d <= 30 ? "m1" : d <= 90 ? "m3" : d <= 180 ? "m6" : "ok"; }
+function today() { var d = new Date(); return d.getFullYear() + "-" + ("0"+(d.getMonth()+1)).slice(-2) + "-" + ("0"+d.getDate()).slice(-2); }
+function roc(iso) { var p = (iso || "").split("-"); return p.length === 3 ? (p[0] - 1911) + "/" + p[1] + "/" + p[2] : iso; }
+
+function setTab(t) {
+  ["items","logs","tools"].forEach(function(k){
+    $("p_" + k).style.display = k === t ? "block" : "none";
+    $("t_" + k).classList.toggle("on", k === t);
+  });
+  render();
+}
+function setFlt(f) { flt = f; renderItems(); }
+
+function renderItems() {
+  var g = dueGroups(), n = g.expired.length + g.thisM.length;
+  $("banner").innerHTML = n ? '<div class="banner"><span><b>⚠ 已到期 ' + g.expired.length + ' 筆、本月到期 ' + g.thisM.length + ' 筆</b>（下月到期 ' + g.nextM.length + ' 筆）</span><button onclick="openProcess()">處理到期藥品</button></div>'
+    : '<div class="banner ok">本月沒有到期藥品；下月到期 ' + g.nextM.length + ' 筆。</div>';
+  var q = $("q").value.trim().toLowerCase();
+  var list = db.items.filter(function(i){ return i.qty > 0; }).map(function(i){
+    var d = daysLeft(i.exp); return Object.assign({}, i, { d: d, l: lvl(d) });
+  }).sort(function(a, b){ return a.d - b.d || a.name.localeCompare(b.name); });
+  var cnt = { all: list.length, expired: 0, m1: 0, m3: 0, m6: 0, ok: 0 };
+  list.forEach(function(i){ cnt[i.l]++; });
+  $("chips").innerHTML = [["all","全部"],["expired","已過期"],["m1","1個月內"],["m3","3個月內"],["m6","6個月內"]].map(function(c){
+    return '<button class="chip ' + c[0] + (flt === c[0] ? " on" : "") + '" onclick="setFlt(\'' + c[0] + '\')">' + c[1] + " " + cnt[c[0]] + "</button>";
+  }).join("");
+  var rows = list.filter(function(i){ return (flt === "all" || i.l === flt) && (!q || i.name.toLowerCase().indexOf(q) >= 0); });
+  $("itemBody").innerHTML = rows.length ? rows.map(function(i){
+    return "<tr><td>" + esc(i.exp) + "</td><td>" + esc(i.name) + '</td><td class="num">' + i.qty.toLocaleString() +
+      '</td><td><span class="badge ' + i.l + '">' + (i.d < 0 ? "已過期 " + (-i.d) + " 天" : "剩 " + i.d + " 天") + '</span></td><td class="muted">' + esc(i.inv || "") +
+      '</td><td class="act"><button onclick="openDestroy(\'' + i.id + '\')">銷毀</button><button class="danger" title="移除此筆" onclick="delItem(\'' + i.id + '\')">✕</button></td></tr>';
+  }).join("") : '<tr><td colspan="6" class="empty">目前沒有符合的藥品。可用「盤點匯入」貼上效期管理紀錄表。</td></tr>';
+}
+
+function renderLogs() {
+  var sel = $("mon"), cur = sel.value, months = {};
+  db.logs.forEach(function(l){ months[l.date.slice(0, 7)] = 1; });
+  sel.innerHTML = '<option value="">全部月份</option>' + Object.keys(months).sort().reverse().map(function(m){ return '<option value="' + m + '">' + m + "</option>"; }).join("");
+  sel.value = months[cur] ? cur : "";
+  var rows = db.logs.filter(function(l){ return !sel.value || l.date.slice(0, 7) === sel.value; }).sort(function(a, b){ return b.date.localeCompare(a.date); });
+  $("printRange").textContent = sel.value ? sel.value + " 月" : "全部期間";
+  $("logBody").innerHTML = rows.length ? rows.map(function(l){
+    return "<tr><td>" + roc(l.date) + "</td><td>" + esc(l.name) + "</td><td>" + esc(l.exp) + '</td><td class="num">' + l.qty.toLocaleString() + "</td><td>" + esc(l.reason) +
+      "</td><td>" + esc(l.by) + "</td><td>" + esc(l.w) + "</td><td>" + esc(l.note) + '</td><td class="act col-act"><button class="danger" onclick="delLog(\'' + l.id + '\')">刪除</button></td></tr>';
+  }).join("") : '<tr><td colspan="9" class="empty">尚無銷毀紀錄。</td></tr>';
+}
+function render() { renderItems(); renderLogs(); }
+
+function addItem() {
+  var exp = normExp($("a_exp").value), name = $("a_name").value.trim(), qty = +$("a_qty").value;
+  if (!exp || !name || !(qty > 0)) { alert("請填寫正確的效期（例 2026/12）、藥品名稱與數量。"); return; }
+  db.items.push({ id: uid(), exp: exp, name: name, qty: qty, inv: $("a_inv").value.trim() });
+  save(); ["a_exp", "a_name", "a_qty"].forEach(function(k){ $(k).value = ""; }); renderItems();
+}
+function delItem(id) {
+  var it = db.items.find(function(i){ return i.id === id; });
+  if (it && confirm("移除「" + it.name + "」這筆近效期資料？（不會產生銷毀紀錄）")) { db.items = db.items.filter(function(i){ return i.id !== id; }); save(); renderItems(); }
+}
+
+function openDestroy(id) {
+  var it = id ? db.items.find(function(i){ return i.id === id; }) : null;
+  $("d_id").value = id || "";
+  $("d_name").value = it ? it.name : ""; $("d_name").readOnly = !!it;
+  $("d_exp").value = it ? it.exp : ""; $("d_exp").readOnly = !!it;
+  $("d_qty").value = it ? it.qty : ""; $("d_qty").max = it ? it.qty : "";
+  $("d_date").value = today();
+  $("d_reason").value = it && daysLeft(it.exp) >= 0 ? "近效期下架" : "效期過期";
+  $("d_by").value = db.pref.by || ""; $("d_w").value = db.pref.w || ""; $("d_note").value = "";
+  $("dlg").showModal();
+}
+function saveDestroy() {
+  var id = $("d_id").value, it = id ? db.items.find(function(i){ return i.id === id; }) : null;
+  var name = $("d_name").value.trim(), qty = +$("d_qty").value, date = $("d_date").value;
+  if (!name || !(qty > 0) || !date) { alert("請填寫品項、數量與銷毀日期。"); return; }
+  if (it && qty > it.qty) { alert("銷毀數量不能超過現有數量 " + it.qty + "。"); return; }
+  if (it) it.qty -= qty;
+  db.logs.push({ id: uid(), date: date, name: name, exp: normExp($("d_exp").value) || $("d_exp").value.trim(), qty: qty, reason: $("d_reason").value,
+    by: $("d_by").value.trim(), w: $("d_w").value.trim(), note: $("d_note").value.trim(), itemId: id });
+  db.pref = { by: $("d_by").value.trim(), w: $("d_w").value.trim() };
+  save(); $("dlg").close(); render();
+}
+function delLog(id) {
+  var l = db.logs.find(function(x){ return x.id === id; }); if (!l || !confirm("刪除這筆銷毀紀錄？")) return;
+  var it = db.items.find(function(i){ return i.id === l.itemId; });
+  if (it && confirm("要把 " + l.qty + " 加回近效期清單的數量嗎？")) it.qty += l.qty;
+  db.logs = db.logs.filter(function(x){ return x.id !== id; }); save(); render();
+}
+
+function parsePaste(t) {
+  var L = t.split(/\r?\n/).map(function(s){ return s.trim(); }).filter(Boolean), out = [], re = /^\d{4}\s*\/\s*\d{1,2}$/, nre = /^[\d,]+$/;
+  for (var i = 0; i < L.length; i++) {
+    var p = L[i].split(/\t+/).map(function(s){ return s.trim(); }).filter(Boolean);
+    if (p.length >= 3 && re.test(p[0]) && nre.test(p[p.length - 1])) {
+      out.push({ exp: normExp(p[0]), name: p.slice(1, -1).join(" "), qty: +p[p.length - 1].replace(/,/g, "") });
+    } else if (re.test(L[i]) && i + 2 < L.length && nre.test(L[i + 2])) {
+      out.push({ exp: normExp(L[i]), name: L[i + 1], qty: +L[i + 2].replace(/,/g, "") }); i += 2;
+    }
+  }
+  return out;
+}
+function applyImport(rows) {
+  var inv = $("i_inv").value.trim();
+  if (!rows.length) { $("i_msg").textContent = "沒有讀到任何資料，請確認檔案內有「效期、藥品名稱、數量」三欄。"; return; }
+  var add = 0, upd = 0, gone = 0, seen = {};
+  rows.forEach(function(r) {
+    var k = r.exp + "|" + r.name.toLowerCase(); seen[k] = 1;
+    var ex = db.items.find(function(i){ return i.exp + "|" + i.name.toLowerCase() === k; });
+    if (ex) { ex.qty = r.qty; ex.inv = inv; upd++; }
+    else { db.items.push({ id: uid(), exp: r.exp, name: r.name, qty: r.qty, inv: inv }); add++; }
+  });
+  if ($("i_full").checked) db.items.forEach(function(i){ if (i.qty > 0 && !seen[i.exp + "|" + i.name.toLowerCase()]) { i.qty = 0; gone++; } });
+  save(); render();
+  $("i_msg").textContent = "完成：共讀到 " + rows.length + " 筆，新增 " + add + "、更新 " + upd + ($("i_full").checked ? "、移出 " + gone : "") + "。";
+}
+function doImport() { applyImport(parsePaste($("i_text").value)); $("i_text").value = ""; }
+function parseRows(rows) {
+  var out = [], dre = /^\d{3,4}\s*[\/\-.]\s*\d{1,2}(\s*[\/\-.]\s*\d{1,2})?$/, nre = /^[\d,]+(\.\d+)?$/;
+  rows.forEach(function(r) {
+    var c = r.map(function(x){ return String(x == null ? "" : x).trim(); });
+    var ei = c.findIndex(function(x){ return dre.test(x); }); if (ei < 0) return;
+    var ni = -1, qi = -1, k;
+    for (k = ei + 1; k < c.length; k++) if (c[k] && !nre.test(c[k])) { ni = k; break; }
+    if (ni < 0) return;
+    for (k = c.length - 1; k > ni; k--) if (nre.test(c[k])) { qi = k; break; }
+    if (qi < 0) return;
+    var q = Math.round(+c[qi].replace(/,/g, ""));
+    if (q > 0) out.push({ exp: normExp(c[ei]), name: c[ni], qty: q });
+  });
+  return out;
+}
+function importXlsx() {
+  var f = $("i_file").files[0]; if (!f) { $("i_msg").textContent = "請先選擇檔案。"; return; }
+  var rd = new FileReader();
+  rd.onload = function(e) {
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" }), rows = [];
+      wb.SheetNames.forEach(function(n){ rows = rows.concat(parseRows(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" }))); });
+      applyImport(rows); $("i_file").value = "";
+    } catch (err) { $("i_msg").textContent = "讀取失敗：" + err.message; }
+  };
+  rd.readAsArrayBuffer(f);
+}
+
+// ---- 到期提醒與處理 ----
+function curMonth(d) { d = d || new Date(); return d.getFullYear() + "/" + ("0" + (d.getMonth() + 1)).slice(-2); }
+function dueGroups() {
+  var cm = curMonth(), n = new Date(); n.setDate(1); n.setMonth(n.getMonth() + 1); var nm = curMonth(n), g = { expired: [], thisM: [], nextM: [] };
+  db.items.forEach(function(i){
+    if (i.qty <= 0) return;
+    if (daysLeft(i.exp) < 0) g.expired.push(i); else if (i.exp === cm) g.thisM.push(i); else if (i.exp === nm) g.nextM.push(i);
+  });
+  return g;
+}
+function maybeAlert() {
+  var g = dueGroups(), urgent = g.expired.length + g.thisM.length > 0;
+  if (urgent) { if (db.pref.alertDay === today()) return; db.pref.alertDay = today(); }
+  else if (g.nextM.length) { if (db.pref.alertMon === curMonth()) return; db.pref.alertMon = curMonth(); }
+  else return;
+  function ls(a) { return a.slice(0, 6).map(function(i){ return esc(i.name) + "（" + i.qty + "）"; }).join("、") + (a.length > 6 ? " …等 " + a.length + " 筆" : ""); }
+  var h = "";
+  if (g.expired.length) h += '<p><span class="badge expired">已到期未處理 ' + g.expired.length + ' 筆</span><br>' + ls(g.expired) + "</p>";
+  if (g.thisM.length) h += '<p><span class="badge m1">本月到期 ' + g.thisM.length + ' 筆</span><br>' + ls(g.thisM) + "</p>";
+  if (g.nextM.length) h += '<p><span class="badge m3">下月到期 ' + g.nextM.length + ' 筆</span><br>' + ls(g.nextM) + "</p>";
+  $("al_body").innerHTML = h; $("al_go").style.display = urgent ? "" : "none";
+  save(); $("dlgAlert").showModal();
+}
+function openProcess() {
+  var g = dueGroups(), list = g.expired.concat(g.thisM).sort(function(a, b){ return a.exp.localeCompare(b.exp) || a.name.localeCompare(b.name); });
+  if (!list.length) { alert("目前沒有已到期或本月到期的藥品。"); return; }
+  $("pr_body").innerHTML = list.map(function(i){
+    var ex = daysLeft(i.exp) < 0;
+    return '<tr data-id="' + i.id + '"><td>' + esc(i.exp) + "</td><td>" + esc(i.name) + '</td><td class="num">' + i.qty + "</td><td>" +
+      (ex ? '<span class="badge expired">已到期</span>' : '<span class="badge m1">本月到期</span>') +
+      '</td><td><select class="pd" onchange="decChg(this)"><option value="keep">尚未處理（保留）</option><option value="all">已銷毀（全部）</option><option value="part">已銷毀（部分）</option><option value="none">不需銷毀（已用完／退廠）</option></select> ' +
+      '<input class="pq" type="number" min="1" max="' + i.qty + '" value="' + i.qty + '" style="display:none"></td></tr>';
+  }).join("");
+  $("pr_date").value = today(); $("pr_by").value = db.pref.by || ""; $("pr_w").value = db.pref.w || ""; $("pr_note").value = "";
+  $("dlgProc").showModal();
+}
+function decChg(s) { s.parentNode.querySelector(".pq").style.display = s.value === "part" ? "inline-block" : "none"; }
+function allDestroyed() { document.querySelectorAll("#pr_body .pd").forEach(function(s){ s.value = "all"; decChg(s); }); }
+function applyProcess() {
+  var date = $("pr_date").value, rows = document.querySelectorAll("#pr_body tr"), plan = [];
+  if (!date) { alert("請填寫銷毀日期。"); return; }
+  for (var k = 0; k < rows.length; k++) {
+    var tr = rows[k], it = db.items.find(function(i){ return i.id === tr.dataset.id; }), dec = tr.querySelector(".pd").value, q = 0;
+    if (!it || dec === "keep") continue;
+    if (dec === "all") q = it.qty;
+    else if (dec === "part") { q = +tr.querySelector(".pq").value; if (!(q >= 1 && q <= it.qty)) { alert("「" + it.name + "」的銷毀數量要在 1 到 " + it.qty + " 之間。"); return; } }
+    plan.push({ it: it, dec: dec, q: q });
+  }
+  if (!plan.length) { $("dlgProc").close(); return; }
+  var nd = plan.filter(function(p){ return p.dec !== "none"; }).length, nn = plan.length - nd;
+  if (!confirm("將寫入 " + nd + " 筆銷毀紀錄" + (nn ? "，另有 " + nn + " 筆標示為不需銷毀（移出清單、不寫紀錄）" : "") + "。確定嗎？")) return;
+  var by = $("pr_by").value.trim(), w = $("pr_w").value.trim(), note = $("pr_note").value.trim();
+  plan.forEach(function(p) {
+    if (p.dec === "none") { p.it.qty = 0; return; }
+    db.logs.push({ id: uid(), date: date, name: p.it.name, exp: p.it.exp, qty: p.q, reason: daysLeft(p.it.exp) < 0 ? "效期過期" : "近效期下架", by: by, w: w, note: note, itemId: p.it.id });
+    p.it.qty -= p.q;
+  });
+  db.pref.by = by; db.pref.w = w; save(); $("dlgProc").close(); render();
+}
+
+function download(blob, name) { var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000); }
+function exportJson() { download(new Blob([JSON.stringify(db)], { type: "application/json" }), "藥品銷毀備份_" + today() + ".json"); }
+function importJson(inp) {
+  var f = inp.files[0]; if (!f) return;
+  var r = new FileReader();
+  r.onload = function(e) {
+    try { var d = JSON.parse(e.target.result); if (!d.items || !d.logs) throw 0;
+      if (confirm("還原會覆蓋目前這台電腦上的資料，確定嗎？")) { db = { items: d.items, logs: d.logs, pref: d.pref || {} }; save(); render(); alert("已還原。"); }
+    } catch (x) { alert("這不是有效的備份檔。"); }
+    inp.value = "";
+  };
+  r.readAsText(f);
+}
+function exportXlsx() {
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(db.items.filter(function(i){ return i.qty > 0; }).map(function(i){ return { "效期": i.exp, "藥品名稱": i.name, "數量": i.qty, "盤點季別": i.inv || "" }; })), "近效期藥品");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(db.logs.map(function(l){ return { "銷毀日期": roc(l.date), "品項": l.name, "效期": l.exp, "數量": l.qty, "原因": l.reason, "執行人": l.by, "監銷人": l.w, "備註": l.note }; })), "銷毀紀錄");
+  XLSX.writeFile(wb, "藥品銷毀與效期管理_" + today() + ".xlsx");
+}
+
+setTab("items");
+maybeAlert();
+</script>
+</body>
+</html>
